@@ -1,4 +1,4 @@
-# RT-PC integration service with 1C
+# Crm integration service with 1C
 
 - Exchange CRM and 1C counterparties
 - Generate an invoice in 1C with a click in CRM
