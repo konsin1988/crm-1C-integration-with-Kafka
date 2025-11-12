@@ -1,0 +1,114 @@
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: kafka_rtpc_1C
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: data_processed
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - ./kafka-data:/var/lib/kafka/data
+      - ./init-topics.sh:/docker-entrypoint-init.d/init-topics.sh
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --list --bootstrap-server kafka:9092 || exit 1"]
+      interval: 10s      # How often to run the check
+      timeout: 5s        # How long to wait for the command to succeed
+      retries: 10         # How many times to retry before marking as 'unhealthy'
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    networks:
+      - kafka-rtpc
+
+  account_creation:
+    build:
+      context: .
+      dockerfile: ./docker/account_creation/Dockerfile
+    platform: linux/amd64
+    container_name: account-creation 
+    ports:
+      - 8013:8000
+    image: konsin1988/account-creation
+    env_file:
+      - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kreator.rule=PathPrefix(`$BASE_LINK`)" 
+      - "traefik.http.routers.kreator.tls=true"
+      - "traefik.http.middlewares.kreator-compress.compress=true"
+    volumes:
+      - ./app/:/app/
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-rtpc 
+
+  guid_updater:
+    build:
+      context: .
+      dockerfile: ./docker/guid_updater/Dockerfile
+    platform: linux/amd64
+    container_name: guid-updater
+    image: konsin1988/guid-updater
+    ports:
+      - "8014:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./guid_updater/:/app/
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-rtpc
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest 
+    container_name: redpanda-ui
+    ports:
+      - "8080:8080"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-rtpc
+
+  jupyter:
+    image: jupyter/minimal-notebook:latest
+    container_name: jupyter-kafka
+    ports:
+      - "1314:8888"
+    volumes:
+      - ./notebook:/home/jovyan/work
+    environment:
+      - JUPYTER_TOKEN=1234
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-rtpc 
+
+
+networks:
+  kafka-rtpc:
+    name: kafka-rtpc
+    external: False
+
+        #networks:
+        #  rtt:
+        #    external: true
